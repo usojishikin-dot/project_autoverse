@@ -40,16 +40,25 @@ class TranscriptionEngine:
     @staticmethod
     def list_audio_devices():
         """
-        Lists available audio input devices.
-        :return: A dictionary of input devices {index: name}.
+        Lists available audio input devices and identifies the default input device.
+        :return: A tuple containing (dictionary of input devices {index: name}, default_device_index).
         """
         try:
             devices = sd.query_devices()
+            hostapis = sd.query_hostapis()
+
+            default_api = next((api for api in hostapis if api['name'] == sd.default.hostapi), None)
+            default_device_index = -1
+            if default_api:
+                default_device_index = default_api['default_input_device']
+
             input_devices = {i: d['name'] for i, d in enumerate(devices) if d['max_input_channels'] > 0}
-            return input_devices
+
+            return input_devices, default_device_index
+
         except Exception as e:
             print(f"Could not retrieve audio devices: {e}")
-            return {}
+            return {}, -1
 
     def _audio_callback(self, indata, frames, time, status):
         """This is called (from a separate thread) for each audio block."""
