@@ -20,11 +20,22 @@ class TranscriptionEngine:
         self.recognizer = None
         self.is_listening = False
         self.audio_queue = queue.Queue()
+        self.model_loaded = False
+        self._load_model()
 
-        if not os.path.exists(self.model_path):
-            raise FileNotFoundError(f"Vosk model not found at path: {self.model_path}")
-
-        self.model = vosk.Model(self.model_path)
+    def _load_model(self):
+        """Loads the Vosk model and sets the model_loaded flag."""
+        try:
+            if not os.path.exists(self.model_path) or not os.listdir(self.model_path):
+                print(f"Vosk model not found or directory is empty at: {self.model_path}")
+                self.model_loaded = False
+                return
+            self.model = vosk.Model(self.model_path)
+            self.model_loaded = True
+            print("Vosk model loaded successfully.")
+        except Exception as e:
+            print(f"Error loading Vosk model: {e}")
+            self.model_loaded = False
 
     @staticmethod
     def list_audio_devices():
@@ -32,54 +43,51 @@ class TranscriptionEngine:
         Lists available audio input devices.
         :return: A dictionary of input devices {index: name}.
         """
-        devices = sd.query_devices()
-        input_devices = {}
-        for i, device in enumerate(devices):
-            # Check if the device is an input device
-            if device['max_input_channels'] > 0:
-                input_devices[i] = device['name']
-        return input_devices
+        try:
+            devices = sd.query_devices()
+            input_devices = {i: d['name'] for i, d in enumerate(devices) if d['max_input_channels'] > 0}
+            return input_devices
+        except Exception as e:
+            print(f"Could not retrieve audio devices: {e}")
+            return {}
 
     def _audio_callback(self, indata, frames, time, status):
         """This is called (from a separate thread) for each audio block."""
         if status:
-            print(status, flush=True)
+            self.status_callback(f"Audio callback status: {status}")
         self.audio_queue.put(bytes(indata))
 
-    def start_listening(self, on_transcription_update, device_index=None):
+    def start_listening(self, on_transcription_update, on_status_update, device_index=None):
         """
         Starts the audio stream and transcription process.
 
-        :param on_transcription_update: A callback function to be called with new transcription results.
-        :param device_index: The index of the audio device to use. Defaults to the system's default input device.
+        :param on_transcription_update: A callback for transcription results.
+        :param on_status_update: A callback for status messages.
+        :param device_index: The index of the audio device to use.
         """
+        self.status_callback = on_status_update
+        if not self.model_loaded:
+            self.status_callback("ERROR: Vosk model is not loaded. Cannot start listening.")
+            return
+
         if self.is_listening:
-            print("Already listening.")
+            self.status_callback("Already listening.")
             return
 
         try:
-            if device_index is None:
-                device_info = sd.query_devices(kind='input')
-            else:
-                device_info = sd.query_devices(device=device_index)
-            
+            device_info = sd.query_devices(device_index, 'input')
             samplerate = int(device_info['default_samplerate'])
 
             self.stream = sd.RawInputStream(
-                samplerate=samplerate,
-                blocksize=8000,
-                device=device_index,
-                dtype='int16',
-                channels=1,
-                callback=self._audio_callback
+                samplerate=samplerate, blocksize=8000, device=device_index,
+                dtype='int16', channels=1, callback=self._audio_callback
             )
 
             self.recognizer = vosk.KaldiRecognizer(self.model, samplerate)
             self.is_listening = True
             self.stream.start()
-            print(f"Started listening on device: {device_info['name']}...")
+            self.status_callback(f"Listening on: {device_info['name']}")
 
-            # Main transcription loop
             while self.is_listening:
                 data = self.audio_queue.get()
                 if self.recognizer.AcceptWaveform(data):
@@ -90,8 +98,12 @@ class TranscriptionEngine:
                     on_transcription_update(partial_result.get('partial', ''), is_final=False)
 
         except Exception as e:
-            print(f"An error occurred while starting to listen: {e}")
+            error_message = f"ERROR: Failed to start listening. Check audio device. Details: {e}"
+            self.status_callback(error_message)
             self.is_listening = False
+            if hasattr(self, 'stream') and self.stream:
+                self.stream.stop()
+                self.stream.close()
 
     def stop_listening(self):
         """

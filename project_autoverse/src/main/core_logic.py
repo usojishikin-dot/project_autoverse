@@ -53,6 +53,18 @@ class CoreLogic:
         
         return None
 
+    def get_ui_text(self, verse_data):
+        """
+        Formats the verse data into a string for UI display.
+
+        :param verse_data: A dictionary with verse info.
+        :return: A formatted string for the UI.
+        """
+        if not verse_data:
+            return ""
+        return f'"...{verse_data["text"]}"\n\n{verse_data["book"]} {verse_data["chapter"]}:{verse_data["verse_num"]} ({verse_data["translation"]})'
+
+
 if __name__ == '__main__':
     # This is a mock DataEngine for testing purposes.
     class MockDataEngine:
@@ -78,9 +90,20 @@ if __name__ == '__main__':
     assert result['verse_num'] == "16"
     print(f"Successfully parsed: '{test_phrase_1}'")
 
+    # Test the new get_ui_text function
+    ui_text = engine.get_ui_text(result)
+    expected_text = '"...For God so loved the world..."\n\nJohn 3:16 (KJV)'
+    assert ui_text == expected_text
+    print(f"Successfully formatted UI text: '{ui_text}'")
+
     test_phrase_2 = "This is a test with no verse"
     result = engine.parse_and_find_verse(test_phrase_2)
     assert result is None
     print(f"Successfully ignored: '{test_phrase_2}'")
+
+    # Test get_ui_text with no result
+    ui_text_none = engine.get_ui_text(result)
+    assert ui_text_none == ""
+    print("Successfully handled None input for UI text.")
 
     print("\nCoreLogic tests passed!")
