@@ -70,6 +70,11 @@ DARK_STYLESHEET = """
         padding: 5px;
         border-radius: 4px;
     }
+    QComboBox#AudioDeviceCombo[listening="true"] {
+        background-color: #107C10; /* Green */
+        color: white;
+        font-weight: bold;
+    }
     QComboBox::drop-down {
         border: none;
     }
@@ -145,6 +150,7 @@ class MainWindow(QMainWindow):
         
         bottom_layout.addWidget(QLabel("Audio Source:"))
         self.audio_device_combo = QComboBox()
+        self.audio_device_combo.setObjectName("AudioDeviceCombo")
         self.audio_device_combo.setMinimumWidth(200)
         bottom_layout.addWidget(self.audio_device_combo)
 
@@ -284,9 +290,16 @@ class MainWindow(QMainWindow):
         return group_widget
 
     def populate_audio_devices(self):
-        self.audio_devices = self.transcription_engine.list_audio_devices()
+        self.audio_devices, default_device_index = self.transcription_engine.list_audio_devices()
         for index, name in self.audio_devices.items():
             self.audio_device_combo.addItem(name, userData=index)
+
+        if default_device_index != -1:
+            # Find the combo box index corresponding to the default device index
+            for i in range(self.audio_device_combo.count()):
+                if self.audio_device_combo.itemData(i) == default_device_index:
+                    self.audio_device_combo.setCurrentIndex(i)
+                    break
 
     def manual_lookup(self):
         """Looks up a verse based on manual input fields."""
@@ -315,6 +328,11 @@ class MainWindow(QMainWindow):
     def toggle_listening(self):
         if self.listen_button.isChecked():
             self.listen_button.setText("STOP LISTENING")
+            self.audio_device_combo.setProperty("listening", "true")
+            # Refresh stylesheet
+            self.audio_device_combo.style().unpolish(self.audio_device_combo)
+            self.audio_device_combo.style().polish(self.audio_device_combo)
+
             selected_index = self.audio_device_combo.currentData()
 
             self.transcription_thread = threading.Thread(
@@ -325,6 +343,11 @@ class MainWindow(QMainWindow):
             self.transcription_thread.start()
         else:
             self.listen_button.setText("START LISTENING")
+            self.audio_device_combo.setProperty("listening", "false")
+            # Refresh stylesheet
+            self.audio_device_combo.style().unpolish(self.audio_device_combo)
+            self.audio_device_combo.style().polish(self.audio_device_combo)
+
             self.transcription_engine.stop_listening()
             self.update_status_bar("Stopped listening.")
 
