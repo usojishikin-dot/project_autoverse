@@ -231,11 +231,49 @@ if __name__ == '__main__':
     # In a real scenario, you would have a separate process to populate the DB
     # with KJV, NIV, and Amplified scriptures.
 
-    # Example of retrieving a verse (will return None since DB is empty)
-    verse = engine.get_verse('KJV', 'John', 3, 16)
-    if verse:
-        print(f"John 3:16 KJV: {verse}")
-    else:
-        print("John 3:16 KJV not found (database is likely empty).")
+    # --- Test Cases ---
+    def run_tests():
+        print("\nRunning DataEngine tests...")
+        # 1. Test with an empty database
+        verse = engine.get_verse('KJV', 'John', 3, 16)
+        assert verse is None
+        print("Test passed: Verse not found in empty DB.")
 
+        # 2. Test inserting and retrieving a verse
+        cursor = engine.connection.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO scriptures (translation, book, chapter, verse_num, text)
+                VALUES ('KJV', 'Genesis', 1, 1, 'In the beginning God created the heaven and the earth.')
+            """)
+            engine.connection.commit()
+            print("Test data inserted.")
+
+            verse = engine.get_verse('KJV', 'genesis', 1, 1) # Test with lowercase book
+            assert verse == 'In the beginning God created the heaven and the earth.'
+            print("Test passed: Successfully retrieved inserted verse.")
+
+            # 3. Test retrieving book names, chapters, and verses
+            books = engine.get_all_book_names()
+            assert "Genesis" in books
+            print(f"Test passed: get_all_book_names() -> {books}")
+
+            chapters = engine.get_chapters_for_book('KJV', 'Genesis')
+            assert "1" in chapters
+            print(f"Test passed: get_chapters_for_book() -> {chapters}")
+
+            verses = engine.get_verses_for_chapter('KJV', 'Genesis', 1)
+            assert "1" in verses
+            print(f"Test passed: get_verses_for_chapter() -> {verses}")
+
+        except sqlite3.Error as e:
+            print(f"An error occurred during tests: {e}")
+        finally:
+            # Clean up the test entry
+            cursor.execute("DELETE FROM scriptures WHERE book = 'Genesis'")
+            engine.connection.commit()
+            cursor.close()
+            print("Test data cleaned up.")
+
+    run_tests()
     engine.close_connection()
