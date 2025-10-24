@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.db
+project_autoverse/data/vosk-model/
+*.egg-info
+.env
