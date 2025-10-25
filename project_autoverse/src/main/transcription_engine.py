@@ -6,6 +6,7 @@ import json
 import os
 from pydub import AudioSegment
 import numpy as np
+from vosk_grammar import generate_vosk_grammar
 
 class TranscriptionEngine:
     """
@@ -107,7 +108,10 @@ class TranscriptionEngine:
                 dtype='int16', channels=1, callback=self._audio_callback
             )
 
-            self.recognizer = vosk.KaldiRecognizer(self.model, self.samplerate)
+            # Generate and apply the custom grammar
+            grammar = generate_vosk_grammar()
+            self.recognizer = vosk.KaldiRecognizer(self.model, self.samplerate, grammar)
+
             self.is_listening = True
             self.stream.start()
             self.status_callback(f"Listening on: {device_info['name']}")
