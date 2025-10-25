@@ -7,6 +7,11 @@ import os
 from pydub import AudioSegment
 import numpy as np
 
+# --- Configuration for Audio Gating ---
+SAMPLERATE = 16000
+BLOCKSIZE = 8000
+SILENCE_THRESHOLD = 0.02
+
 # --- 1. The Vocabulary Generator Class ---
 
 class VoskGrammarGenerator:
@@ -140,11 +145,15 @@ class TranscriptionEngine:
         if status:
             self.status_callback(f"Audio callback status: {status}")
 
-        # The data from sounddevice is a numpy array, which is what we need for wav saving
+        # VAD Logic: Calculate chunk energy and gate silence
+        chunk_energy = np.abs(indata).mean()
+        if chunk_energy < SILENCE_THRESHOLD:
+            return  # Discard the chunk if it's below the silence threshold
+
         if self.is_recording:
             self.recorded_frames.append(indata.copy())
 
-        self.audio_queue.put(bytes(indata))
+        self.audio_queue.put(indata.tobytes())
 
     def start_listening(self, on_transcription_update, on_status_update, device_index=None, record_audio=False):
         """
@@ -165,7 +174,6 @@ class TranscriptionEngine:
 
         try:
             device_info = sd.query_devices(device_index, 'input')
-            self.samplerate = int(device_info['default_samplerate'])
 
             # Start recording if requested
             self.is_recording = record_audio
@@ -174,13 +182,17 @@ class TranscriptionEngine:
                 self.status_callback("Recording audio...")
 
             self.stream = sd.InputStream(
-                samplerate=self.samplerate, blocksize=8000, device=device_index,
-                dtype='int16', channels=1, callback=self._audio_callback
+                samplerate=SAMPLERATE,
+                blocksize=BLOCKSIZE,
+                device=device_index,
+                dtype='int16',
+                channels=1,
+                callback=self._audio_callback
             )
 
             # Generate and apply the custom grammar
             grammar = VoskGrammarGenerator.generate_vosk_json()
-            self.recognizer = vosk.KaldiRecognizer(self.model, self.samplerate, grammar)
+            self.recognizer = vosk.KaldiRecognizer(self.model, SAMPLERATE, grammar)
 
             self.is_listening = True
             self.stream.start()
@@ -238,7 +250,7 @@ class TranscriptionEngine:
             # Create an AudioSegment from the raw audio data
             audio_segment = AudioSegment(
                 audio_data.tobytes(),
-                frame_rate=self.samplerate,
+                frame_rate=SAMPLERATE,
                 sample_width=audio_data.dtype.itemsize,
                 channels=1
             )
