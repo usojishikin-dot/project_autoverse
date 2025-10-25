@@ -4,7 +4,7 @@ import sounddevice as sd
 import queue
 import json
 import os
-import wave
+from pydub import AudioSegment
 import numpy as np
 
 class TranscriptionEngine:
@@ -147,8 +147,8 @@ class TranscriptionEngine:
 
     def save_audio_stream(self, output_path):
         """
-        Saves the captured audio stream to a WAV file.
-        :param output_path: The path to save the WAV file.
+        Saves the captured audio stream to a MP3 file.
+        :param output_path: The path to save the MP3 file.
         """
         if not self.recorded_frames:
             self.status_callback("No audio recorded to save.")
@@ -158,14 +158,20 @@ class TranscriptionEngine:
             # Ensure the output directory exists
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-            wave_file = wave.open(output_path, 'wb')
-            wave_file.setnchannels(1)
-            wave_file.setsampwidth(2)  # int16 = 2 bytes
-            wave_file.setframerate(self.samplerate)
+            # Combine the recorded frames into a single numpy array
+            audio_data = np.concatenate(self.recorded_frames, axis=0)
 
-            # Concatenate the numpy arrays and write to the file
-            wave_file.writeframes(np.concatenate(self.recorded_frames, axis=0).tobytes())
-            wave_file.close()
+            # Create an AudioSegment from the raw audio data
+            audio_segment = AudioSegment(
+                audio_data.tobytes(),
+                frame_rate=self.samplerate,
+                sample_width=audio_data.dtype.itemsize,
+                channels=1
+            )
+
+            # Export the audio to MP3 format
+            audio_segment.export(output_path, format="mp3")
+
             self.status_callback(f"Audio saved to {output_path}")
         except Exception as e:
             self.status_callback(f"Error saving audio: {e}")
@@ -220,7 +226,7 @@ if __name__ == '__main__':
             engine.stop_listening()
 
             # Save the recorded audio
-            output_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'recordings', 'test_recording.wav')
+            output_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'recordings', 'test_recording.mp3')
             engine.save_audio_stream(output_path)
 
             print("Demonstration finished.")
