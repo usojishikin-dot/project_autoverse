@@ -16,7 +16,7 @@ from data_engine import DataEngine
 from core_logic import CoreLogic
 
 # --- Configuration ---
-VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'vosk-model')
+VOSK_MODEL_PATH = "vosk-model-small-en-us-0.15"
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'bible.db')
 
 # --- Stylesheet for Dark Theme ---
