@@ -6,9 +6,11 @@ import json
 import os
 from pydub import AudioSegment
 import numpy as np
+from scipy.signal import resample
 
-# --- Configuration for Audio Gating ---
-SAMPLERATE = 16000
+# --- Configuration for Audio Processing ---
+TARGET_SAMPLERATE = 16000
+TARGET_DTYPE = 'int16'
 BLOCKSIZE = 8000
 SILENCE_THRESHOLD = 0.02
 
@@ -82,6 +84,12 @@ class VoskGrammarGenerator:
         # For simple vocabulary biasing, we can simply stringify the list
         return json.dumps(grammar_list)
 
+def _resample_audio(indata, current_samplerate):
+    """Resamples audio data to the target rate using SciPy."""
+    num_samples = int(len(indata) * TARGET_SAMPLERATE / current_samplerate)
+    resampled_data = resample(indata, num_samples)
+    return resampled_data.astype(TARGET_DTYPE)
+
 class TranscriptionEngine:
     """
     Handles live audio transcription using the Vosk STT library.
@@ -100,6 +108,7 @@ class TranscriptionEngine:
         self.model_loaded = False
         self.is_recording = False
         self.recorded_frames = []
+        self.device_samplerate = None
         self._load_model()
 
     def _load_model(self):
@@ -145,6 +154,10 @@ class TranscriptionEngine:
         if status:
             self.status_callback(f"Audio callback status: {status}")
 
+        # Resample if the device sample rate doesn't match the target
+        if self.device_samplerate != TARGET_SAMPLERATE:
+            indata = _resample_audio(indata, self.device_samplerate)
+
         # Normalize audio data to float32 for VAD calculation
         audio_float = indata.astype(np.float32) / 32768.0
 
@@ -177,6 +190,7 @@ class TranscriptionEngine:
 
         try:
             device_info = sd.query_devices(device_index, 'input')
+            self.device_samplerate = int(device_info['default_samplerate'])
 
             # Start recording if requested
             self.is_recording = record_audio
@@ -185,17 +199,17 @@ class TranscriptionEngine:
                 self.status_callback("Recording audio...")
 
             self.stream = sd.InputStream(
-                samplerate=SAMPLERATE,
+                samplerate=self.device_samplerate,
                 blocksize=BLOCKSIZE,
                 device=device_index,
-                dtype='int16',
+                dtype=TARGET_DTYPE,
                 channels=1,
                 callback=self._audio_callback
             )
 
             # Generate and apply the custom grammar
             grammar = VoskGrammarGenerator.generate_vosk_json()
-            self.recognizer = vosk.KaldiRecognizer(self.model, SAMPLERATE, grammar)
+            self.recognizer = vosk.KaldiRecognizer(self.model, TARGET_SAMPLERATE, grammar)
 
             self.is_listening = True
             self.stream.start()
@@ -253,7 +267,7 @@ class TranscriptionEngine:
             # Create an AudioSegment from the raw audio data
             audio_segment = AudioSegment(
                 audio_data.tobytes(),
-                frame_rate=SAMPLERATE,
+                frame_rate=TARGET_SAMPLERATE,
                 sample_width=audio_data.dtype.itemsize,
                 channels=1
             )
