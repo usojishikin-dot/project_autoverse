@@ -100,11 +100,12 @@ class TranscriptionEngine:
     def _load_model(self):
         """Loads the Vosk model and sets the model_loaded flag."""
         try:
-            if not os.path.exists(self.model_path) or not os.listdir(self.model_path):
-                print(f"Vosk model not found or directory is empty at: {self.model_path}")
+            abs_model_path = os.path.abspath(self.model_path)
+            if not os.path.exists(abs_model_path) or not os.listdir(abs_model_path):
+                print(f"DEBUG: Vosk model not found. Checked absolute path: {abs_model_path}")
                 self.model_loaded = False
                 return
-            self.model = vosk.Model(self.model_path)
+            self.model = vosk.Model(abs_model_path)
             self.model_loaded = True
             print("Vosk model loaded successfully.")
         except Exception as e:
