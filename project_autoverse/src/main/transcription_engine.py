@@ -4,6 +4,8 @@ import sounddevice as sd
 import queue
 import json
 import os
+import wave
+import numpy as np
 
 class TranscriptionEngine:
     """
@@ -21,6 +23,8 @@ class TranscriptionEngine:
         self.is_listening = False
         self.audio_queue = queue.Queue()
         self.model_loaded = False
+        self.is_recording = False
+        self.recorded_frames = []
         self._load_model()
 
     def _load_model(self):
@@ -64,9 +68,14 @@ class TranscriptionEngine:
         """This is called (from a separate thread) for each audio block."""
         if status:
             self.status_callback(f"Audio callback status: {status}")
+
+        # The data from sounddevice is a numpy array, which is what we need for wav saving
+        if self.is_recording:
+            self.recorded_frames.append(indata.copy())
+
         self.audio_queue.put(bytes(indata))
 
-    def start_listening(self, on_transcription_update, on_status_update, device_index=None):
+    def start_listening(self, on_transcription_update, on_status_update, device_index=None, record_audio=False):
         """
         Starts the audio stream and transcription process.
 
@@ -85,14 +94,20 @@ class TranscriptionEngine:
 
         try:
             device_info = sd.query_devices(device_index, 'input')
-            samplerate = int(device_info['default_samplerate'])
+            self.samplerate = int(device_info['default_samplerate'])
 
-            self.stream = sd.RawInputStream(
-                samplerate=samplerate, blocksize=8000, device=device_index,
+            # Start recording if requested
+            self.is_recording = record_audio
+            if self.is_recording:
+                self.recorded_frames = [] # Clear previous recording
+                self.status_callback("Recording audio...")
+
+            self.stream = sd.InputStream(
+                samplerate=self.samplerate, blocksize=8000, device=device_index,
                 dtype='int16', channels=1, callback=self._audio_callback
             )
 
-            self.recognizer = vosk.KaldiRecognizer(self.model, samplerate)
+            self.recognizer = vosk.KaldiRecognizer(self.model, self.samplerate)
             self.is_listening = True
             self.stream.start()
             self.status_callback(f"Listening on: {device_info['name']}")
@@ -119,20 +134,41 @@ class TranscriptionEngine:
         Stops the audio stream and transcription process.
         """
         if not self.is_listening:
-            print("Not currently listening.")
+            self.status_callback("Not currently listening.")
             return
 
         self.is_listening = False
         if hasattr(self, 'stream') and self.stream:
             self.stream.stop()
             self.stream.close()
-        print("Stopped listening.")
+
+        self.is_recording = False
+        self.status_callback("Stopped listening.")
 
     def save_audio_stream(self, output_path):
         """
-        Placeholder for functionality to save the captured audio stream.
+        Saves the captured audio stream to a WAV file.
+        :param output_path: The path to save the WAV file.
         """
-        print(f"[INFO] Audio stream saving to {output_path} is not yet implemented.")
+        if not self.recorded_frames:
+            self.status_callback("No audio recorded to save.")
+            return
+
+        try:
+            # Ensure the output directory exists
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+            wave_file = wave.open(output_path, 'wb')
+            wave_file.setnchannels(1)
+            wave_file.setsampwidth(2)  # int16 = 2 bytes
+            wave_file.setframerate(self.samplerate)
+
+            # Concatenate the numpy arrays and write to the file
+            wave_file.writeframes(np.concatenate(self.recorded_frames, axis=0).tobytes())
+            wave_file.close()
+            self.status_callback(f"Audio saved to {output_path}")
+        except Exception as e:
+            self.status_callback(f"Error saving audio: {e}")
 
 
 if __name__ == '__main__':
@@ -146,6 +182,10 @@ if __name__ == '__main__':
         else:
             print(f"Partial: {text}")
 
+    def handle_status(message):
+        """A simple callback to print status messages."""
+        print(f"STATUS: {message}")
+
     if not os.path.exists(VOSK_MODEL_PATH) or not os.listdir(VOSK_MODEL_PATH):
         print("Vosk model not found or directory is empty.")
         print(f"Please download a model from https://alphacephei.com/vosk/models and unzip it to: {VOSK_MODEL_PATH}")
@@ -155,16 +195,14 @@ if __name__ == '__main__':
 
             # 1. List available audio devices
             print("Available audio input devices:")
-            devices = engine.list_audio_devices()
+            devices, default_index = engine.list_audio_devices()
             for index, name in devices.items():
-                print(f"  [{index}] {name}")
+                default_marker = "(Default)" if index == default_index else ""
+                print(f"  [{index}] {name} {default_marker}")
             
-            # In a real UI, you would present this list in a dropdown.
-            # For this demo, we will use the default device (None).
-            # To test a specific device, change SELECTED_DEVICE_INDEX to the desired index.
-            SELECTED_DEVICE_INDEX = None 
+            SELECTED_DEVICE_INDEX = default_index
             
-            print("\nStarting transcription in 3 seconds... Speak into your microphone.")
+            print(f"\nStarting transcription in 3 seconds on device {SELECTED_DEVICE_INDEX}...")
             import time
             time.sleep(3)
 
@@ -172,7 +210,7 @@ if __name__ == '__main__':
             import threading
             transcription_thread = threading.Thread(
                 target=engine.start_listening, 
-                args=(handle_transcription, SELECTED_DEVICE_INDEX)
+                args=(handle_transcription, handle_status, SELECTED_DEVICE_INDEX, True) # Record audio
             )
             transcription_thread.daemon = True
             transcription_thread.start()
@@ -180,6 +218,11 @@ if __name__ == '__main__':
             # Let it run for 10 seconds
             time.sleep(10)
             engine.stop_listening()
+
+            # Save the recorded audio
+            output_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'recordings', 'test_recording.wav')
+            engine.save_audio_stream(output_path)
+
             print("Demonstration finished.")
 
         except Exception as e:
