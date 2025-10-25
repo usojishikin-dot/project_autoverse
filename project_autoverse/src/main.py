@@ -15,9 +15,11 @@ from transcription_engine import TranscriptionEngine
 from data_engine import DataEngine
 from core_logic import CoreLogic
 
-# --- Configuration ---
-VOSK_MODEL_PATH = "vosk-model-small-en-us-0.15"
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'bible.db')
+# --- Robust Path Configuration ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+VOSK_MODEL_PATH = os.path.join(BASE_DIR, "vosk-model-small-en-us-0.15")
+DB_PATH = os.path.join(BASE_DIR, '..', 'data', 'bible.db')
+RECORDING_PATH = os.path.join(BASE_DIR, '..', 'data', 'recordings')
 
 # --- Stylesheet for Dark Theme ---
 DARK_STYLESHEET = """
@@ -355,7 +357,7 @@ class MainWindow(QMainWindow):
 
             if self.record_audio_checkbox.isChecked():
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                output_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'recordings', f'recording_{timestamp}.mp3')
+                output_path = os.path.join(RECORDING_PATH, f'recording_{timestamp}.mp3')
                 self.transcription_engine.save_audio_stream(output_path)
 
     def on_transcription_update(self, text, is_final):
