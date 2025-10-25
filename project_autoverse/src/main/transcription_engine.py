@@ -6,7 +6,76 @@ import json
 import os
 from pydub import AudioSegment
 import numpy as np
-from vosk_grammar import generate_vosk_grammar
+
+# --- 1. The Vocabulary Generator Class ---
+
+class VoskGrammarGenerator:
+    """
+    Generates the custom JSON grammar for Vosk based on church and Bible terminology.
+    This helps Vosk prioritize domain-specific words, reducing recognition errors.
+    """
+
+    # 66 Books of the Bible (Canonical Names for the Grammar)
+    BIBLE_BOOKS = [
+        # Old Testament
+        "genesis", "exodus", "leviticus", "numbers", "deuteronomy", "joshua",
+        "judges", "ruth", "first samuel", "second samuel", "first kings",
+        "second kings", "first chronicles", "second chronicles", "ezra",
+        "nehemiah", "esther", "job", "psalms", "proverbs", "ecclesiastes",
+        "song of solomon", "isaiah", "jeremiah", "lamentations", "ezekiel",
+        "daniel", "hosea", "joel", "amos", "obadiah", "jonah", "micah",
+        "nahum", "habakkuk", "zephaniah", "haggai", "zechariah", "malachi",
+        # New Testament
+        "matthew", "mark", "luke", "john", "acts", "romans",
+        "first corinthians", "second corinthians", "galatians", "ephesians",
+        "philippians", "colossians", "first thessalonians", "second thessalonians",
+        "first timothy", "second timothy", "titus", "philemon", "hebrews",
+        "james", "first peter", "second peter", "first john", "second john",
+        "third john", "jude", "revelation"
+    ]
+
+    # Numbers for Chapters/Verses (0 to 100 for redundancy)
+    NUMBERS = [str(i) for i in range(101)] + [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+        "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+        "twenty", "thirty", "forty", "fifty", "hundred",
+        # Ordinals for 1/2/3 John/Peter/Corinthians
+        "first", "second", "third"
+    ]
+
+    # Citation & Church-Specific Keywords
+    KEYWORDS = [
+        "chapter", "verse", "to", "through", "and", "in", "let us read",
+        "turn to", "referencing", "elder", "deacon", "pastor", "reverend",
+        "trinity", "baptism", "eucharist", "doxology", "amen", "hallelujah"
+    ]
+
+    @classmethod
+    def generate_grammar_list(cls):
+        """Generates a complete list of all words for the Vosk grammar."""
+        # Combine all lists, convert to lowercase, and ensure unique words
+        full_vocabulary = set()
+
+        # Add book names and their components (e.g., 'first' and 'corinthians' separately)
+        for book in cls.BIBLE_BOOKS:
+            for word in book.split():
+                full_vocabulary.add(word)
+
+        # Add numbers and keywords
+        full_vocabulary.update(cls.NUMBERS)
+        full_vocabulary.update(cls.KEYWORDS)
+
+        # Vosk expects the grammar to be a list of words, plus the out-of-vocabulary token [unk]
+        return list(full_vocabulary)
+
+    @classmethod
+    def generate_vosk_json(cls):
+        """Creates the JSON string required by Vosk for grammar biasing."""
+        # The structure is a simple list of strings
+        grammar_list = cls.generate_grammar_list()
+
+        # For simple vocabulary biasing, we can simply stringify the list
+        return json.dumps(grammar_list)
 
 class TranscriptionEngine:
     """
@@ -109,7 +178,7 @@ class TranscriptionEngine:
             )
 
             # Generate and apply the custom grammar
-            grammar = generate_vosk_grammar()
+            grammar = VoskGrammarGenerator.generate_vosk_json()
             self.recognizer = vosk.KaldiRecognizer(self.model, self.samplerate, grammar)
 
             self.is_listening = True
@@ -179,62 +248,3 @@ class TranscriptionEngine:
             self.status_callback(f"Audio saved to {output_path}")
         except Exception as e:
             self.status_callback(f"Error saving audio: {e}")
-
-
-if __name__ == '__main__':
-    # Example Usage:
-    VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'vosk-model')
-
-    def handle_transcription(text, is_final):
-        """A simple callback to print the transcription results."""
-        if is_final:
-            print(f"Final: {text}")
-        else:
-            print(f"Partial: {text}")
-
-    def handle_status(message):
-        """A simple callback to print status messages."""
-        print(f"STATUS: {message}")
-
-    if not os.path.exists(VOSK_MODEL_PATH) or not os.listdir(VOSK_MODEL_PATH):
-        print("Vosk model not found or directory is empty.")
-        print(f"Please download a model from https://alphacephei.com/vosk/models and unzip it to: {VOSK_MODEL_PATH}")
-    else:
-        try:
-            engine = TranscriptionEngine(VOSK_MODEL_PATH)
-
-            # 1. List available audio devices
-            print("Available audio input devices:")
-            devices, default_index = engine.list_audio_devices()
-            for index, name in devices.items():
-                default_marker = "(Default)" if index == default_index else ""
-                print(f"  [{index}] {name} {default_marker}")
-            
-            SELECTED_DEVICE_INDEX = default_index
-            
-            print(f"\nStarting transcription in 3 seconds on device {SELECTED_DEVICE_INDEX}...")
-            import time
-            time.sleep(3)
-
-            # 2. Start listening on the selected device
-            import threading
-            transcription_thread = threading.Thread(
-                target=engine.start_listening, 
-                args=(handle_transcription, handle_status, SELECTED_DEVICE_INDEX, True) # Record audio
-            )
-            transcription_thread.daemon = True
-            transcription_thread.start()
-
-            # Let it run for 10 seconds
-            time.sleep(10)
-            engine.stop_listening()
-
-            # Save the recorded audio
-            output_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'recordings', 'test_recording.mp3')
-            engine.save_audio_stream(output_path)
-
-            print("Demonstration finished.")
-
-        except Exception as e:
-            print(f"An error occurred during the demonstration: {e}")
-            print("Please ensure you have 'sounddevice' and 'vosk' installed: pip install sounddevice vosk")
