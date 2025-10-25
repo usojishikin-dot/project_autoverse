@@ -1,10 +1,11 @@
 import sys
 import os
 import threading
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QComboBox, QTextEdit, QLabel, QLineEdit, QFontComboBox, 
-    QSpinBox, QColorDialog, QFrame, QCompleter
+    QSpinBox, QColorDialog, QFrame, QCompleter, QCheckBox
 )
 from PyQt6.QtCore import pyqtSignal, QObject, Qt, QStringListModel
 
@@ -145,7 +146,8 @@ class MainWindow(QMainWindow):
 
         # === BOTTOM ROW: AUDIO & CLEAR ===
         bottom_layout = QHBoxLayout()
-        bottom_layout.addWidget(QLabel("Audio Record")) # Placeholder for switch
+        self.record_audio_checkbox = QCheckBox("Record Audio")
+        bottom_layout.addWidget(self.record_audio_checkbox)
         bottom_layout.addStretch()
         
         bottom_layout.addWidget(QLabel("Audio Source:"))
@@ -334,10 +336,11 @@ class MainWindow(QMainWindow):
             self.audio_device_combo.style().polish(self.audio_device_combo)
 
             selected_index = self.audio_device_combo.currentData()
+            should_record = self.record_audio_checkbox.isChecked()
 
             self.transcription_thread = threading.Thread(
                 target=self.transcription_engine.start_listening,
-                args=(self.on_transcription_update, self.on_status_update, selected_index)
+                args=(self.on_transcription_update, self.on_status_update, selected_index, should_record)
             )
             self.transcription_thread.daemon = True
             self.transcription_thread.start()
@@ -349,7 +352,11 @@ class MainWindow(QMainWindow):
             self.audio_device_combo.style().polish(self.audio_device_combo)
 
             self.transcription_engine.stop_listening()
-            self.update_status_bar("Stopped listening.")
+
+            if self.record_audio_checkbox.isChecked():
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                output_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'recordings', f'recording_{timestamp}.wav')
+                self.transcription_engine.save_audio_stream(output_path)
 
     def on_transcription_update(self, text, is_final):
         self.signals.update_transcript.emit(text, is_final)
