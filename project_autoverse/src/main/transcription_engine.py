@@ -145,8 +145,11 @@ class TranscriptionEngine:
         if status:
             self.status_callback(f"Audio callback status: {status}")
 
+        # Normalize audio data to float32 for VAD calculation
+        audio_float = indata.astype(np.float32) / 32768.0
+
         # VAD Logic: Calculate chunk energy and gate silence
-        chunk_energy = np.abs(indata).mean()
+        chunk_energy = np.abs(audio_float).mean()
         if chunk_energy < SILENCE_THRESHOLD:
             return  # Discard the chunk if it's below the silence threshold
 
