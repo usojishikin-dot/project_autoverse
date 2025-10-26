@@ -1,5 +1,6 @@
 
 import re
+import time
 
 BIBLE_BOOKS = [
     "genesis", "exodus", "leviticus", "numbers", "deuteronomy", "joshua",
@@ -108,7 +109,8 @@ class CoreLogic:
                 'book': self.data_engine.spoken_word_map.get(book, book).title(),
                 'chapter': chapter,
                 'verse_num': verse,
-                'text': verse_text
+                'text': verse_text,
+                'timestamp': time.time()
             }
         
         return None
