@@ -4,95 +4,6 @@ import sounddevice as sd
 import queue
 import json
 import os
-from pydub import AudioSegment
-import numpy as np
-from scipy.signal import resample
-
-# --- Configuration for Audio Processing ---
-TARGET_SAMPLERATE = 16000
-TARGET_DTYPE = 'int16'
-BLOCKSIZE = 4000  # Smaller blocksize for lower latency; may increase CPU load.
-SILENCE_THRESHOLD = 0.02
-
-# --- Model Confirmation ---
-# For maximum speed and low latency, a small model like 'vosk-model-small-en-us-0.15' is recommended.
-# The current configuration in main.py points to a model of this size.
-
-# --- 1. The Vocabulary Generator Class ---
-
-class VoskGrammarGenerator:
-    """
-    Generates the custom JSON grammar for Vosk based on church and Bible terminology.
-    This helps Vosk prioritize domain-specific words, reducing recognition errors.
-    """
-
-    # 66 Books of the Bible (Canonical Names for the Grammar)
-    BIBLE_BOOKS = [
-        # Old Testament
-        "genesis", "exodus", "leviticus", "numbers", "deuteronomy", "joshua",
-        "judges", "ruth", "first samuel", "second samuel", "first kings",
-        "second kings", "first chronicles", "second chronicles", "ezra",
-        "nehemiah", "esther", "job", "psalms", "proverbs", "ecclesiastes",
-        "song of solomon", "isaiah", "jeremiah", "lamentations", "ezekiel",
-        "daniel", "hosea", "joel", "amos", "obadiah", "jonah", "micah",
-        "nahum", "habakkuk", "zephaniah", "haggai", "zechariah", "malachi",
-        # New Testament
-        "matthew", "mark", "luke", "john", "acts", "romans",
-        "first corinthians", "second corinthians", "galatians", "ephesians",
-        "philippians", "colossians", "first thessalonians", "second thessalonians",
-        "first timothy", "second timothy", "titus", "philemon", "hebrews",
-        "james", "first peter", "second peter", "first john", "second john",
-        "third john", "jude", "revelation"
-    ]
-
-    # Numbers for Chapters/Verses (0 to 100 for redundancy)
-    NUMBERS = [str(i) for i in range(101)] + [
-        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
-        "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
-        "twenty", "thirty", "forty", "fifty", "hundred",
-        # Ordinals for 1/2/3 John/Peter/Corinthians
-        "first", "second", "third"
-    ]
-
-    # Citation & Church-Specific Keywords
-    KEYWORDS = [
-        "chapter", "verse", "to", "through", "and", "in", "let us read",
-        "turn to", "referencing", "elder", "deacon", "pastor", "reverend",
-        "trinity", "baptism", "eucharist", "doxology", "amen", "hallelujah"
-    ]
-
-    @classmethod
-    def generate_grammar_list(cls):
-        """Generates a complete list of all words for the Vosk grammar."""
-        # Combine all lists, convert to lowercase, and ensure unique words
-        full_vocabulary = set()
-
-        # Add book names and their components (e.g., 'first' and 'corinthians' separately)
-        for book in cls.BIBLE_BOOKS:
-            for word in book.split():
-                full_vocabulary.add(word)
-
-        # Add numbers and keywords
-        full_vocabulary.update(cls.NUMBERS)
-        full_vocabulary.update(cls.KEYWORDS)
-
-        # Vosk expects the grammar to be a list of words, plus the out-of-vocabulary token [unk]
-        return list(full_vocabulary)
-
-    @classmethod
-    def generate_vosk_json(cls):
-        """Creates the JSON string required by Vosk for grammar biasing."""
-        # The structure is a simple list of strings
-        grammar_list = cls.generate_grammar_list()
-
-        # For simple vocabulary biasing, we can simply stringify the list
-        return json.dumps(grammar_list)
-
-def _resample_audio(indata, current_samplerate):
-    """Resamples audio data to the target rate using SciPy."""
-    num_samples = int(len(indata) * TARGET_SAMPLERATE / current_samplerate)
-    resampled_data = resample(indata, num_samples)
-    return resampled_data.astype(TARGET_DTYPE)
 
 class TranscriptionEngine:
     """
@@ -109,116 +20,66 @@ class TranscriptionEngine:
         self.recognizer = None
         self.is_listening = False
         self.audio_queue = queue.Queue()
-        self.model_loaded = False
-        self.is_recording = False
-        self.recorded_frames = []
-        self.device_samplerate = None
-        self._load_model()
 
-    def _load_model(self):
-        """Loads the Vosk model and sets the model_loaded flag."""
-        try:
-            abs_model_path = os.path.abspath(self.model_path)
-            if not os.path.exists(abs_model_path) or not os.listdir(abs_model_path):
-                print(f"DEBUG: Vosk model not found. Checked absolute path: {abs_model_path}")
-                self.model_loaded = False
-                return
-            self.model = vosk.Model(abs_model_path)
-            self.model_loaded = True
-            print("Vosk model loaded successfully.")
-        except Exception as e:
-            print(f"Error loading Vosk model: {e}")
-            self.model_loaded = False
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"Vosk model not found at path: {self.model_path}")
+
+        self.model = vosk.Model(self.model_path)
 
     @staticmethod
     def list_audio_devices():
         """
-        Lists available audio input devices and identifies the default input device.
-        :return: A tuple containing (dictionary of input devices {index: name}, default_device_index).
+        Lists available audio input devices.
+        :return: A dictionary of input devices {index: name}.
         """
-        try:
-            devices = sd.query_devices()
-            hostapis = sd.query_hostapis()
-
-            default_api = next((api for api in hostapis if api['name'] == sd.default.hostapi), None)
-            default_device_index = -1
-            if default_api:
-                default_device_index = default_api['default_input_device']
-
-            input_devices = {i: d['name'] for i, d in enumerate(devices) if d['max_input_channels'] > 0}
-
-            return input_devices, default_device_index
-
-        except Exception as e:
-            print(f"Could not retrieve audio devices: {e}")
-            return {}, -1
+        devices = sd.query_devices()
+        input_devices = {}
+        for i, device in enumerate(devices):
+            # Check if the device is an input device
+            if device['max_input_channels'] > 0:
+                input_devices[i] = device['name']
+        return input_devices
 
     def _audio_callback(self, indata, frames, time, status):
         """This is called (from a separate thread) for each audio block."""
         if status:
-            self.status_callback(f"Audio callback status: {status}")
+            print(status, flush=True)
+        self.audio_queue.put(bytes(indata))
 
-        # Resample if the device sample rate doesn't match the target
-        if self.device_samplerate != TARGET_SAMPLERATE:
-            indata = _resample_audio(indata, self.device_samplerate)
-
-        # Normalize audio data to float32 for VAD calculation
-        audio_float = indata.astype(np.float32) / 32768.0
-
-        # VAD Logic: Calculate chunk energy and gate silence
-        chunk_energy = np.abs(audio_float).mean()
-        if chunk_energy < SILENCE_THRESHOLD:
-            return  # Discard the chunk if it's below the silence threshold
-
-        if self.is_recording:
-            self.recorded_frames.append(indata.copy())
-
-        self.audio_queue.put(indata.tobytes())
-
-    def start_listening(self, on_transcription_update, on_status_update, device_index=None, record_audio=False):
+    def start_listening(self, on_transcription_update, device_index=None):
         """
         Starts the audio stream and transcription process.
 
-        :param on_transcription_update: A callback for transcription results.
-        :param on_status_update: A callback for status messages.
-        :param device_index: The index of the audio device to use.
+        :param on_transcription_update: A callback function to be called with new transcription results.
+        :param device_index: The index of the audio device to use. Defaults to the system's default input device.
         """
-        self.status_callback = on_status_update
-        if not self.model_loaded:
-            self.status_callback("ERROR: Vosk model is not loaded. Cannot start listening.")
-            return
-
         if self.is_listening:
-            self.status_callback("Already listening.")
+            print("Already listening.")
             return
 
         try:
-            device_info = sd.query_devices(device_index, 'input')
-            self.device_samplerate = int(device_info['default_samplerate'])
+            if device_index is None:
+                device_info = sd.query_devices(kind='input')
+            else:
+                device_info = sd.query_devices(device=device_index)
 
-            # Start recording if requested
-            self.is_recording = record_audio
-            if self.is_recording:
-                self.recorded_frames = [] # Clear previous recording
-                self.status_callback("Recording audio...")
+            samplerate = int(device_info['default_samplerate'])
 
-            self.stream = sd.InputStream(
-                samplerate=self.device_samplerate,
-                blocksize=BLOCKSIZE,
+            self.stream = sd.RawInputStream(
+                samplerate=samplerate,
+                blocksize=8000,
                 device=device_index,
-                dtype=TARGET_DTYPE,
+                dtype='int16',
                 channels=1,
                 callback=self._audio_callback
             )
 
-            # Generate and apply the custom grammar
-            grammar = VoskGrammarGenerator.generate_vosk_json()
-            self.recognizer = vosk.KaldiRecognizer(self.model, TARGET_SAMPLERATE, grammar)
-
+            self.recognizer = vosk.KaldiRecognizer(self.model, samplerate)
             self.is_listening = True
             self.stream.start()
-            self.status_callback(f"Listening on: {device_info['name']}")
+            print(f"Started listening on device: {device_info['name']}...")
 
+            # Main transcription loop
             while self.is_listening:
                 data = self.audio_queue.get()
                 if self.recognizer.AcceptWaveform(data):
@@ -229,56 +90,77 @@ class TranscriptionEngine:
                     on_transcription_update(partial_result.get('partial', ''), is_final=False)
 
         except Exception as e:
-            error_message = f"ERROR: Failed to start listening. Check audio device. Details: {e}"
-            self.status_callback(error_message)
+            print(f"An error occurred while starting to listen: {e}")
             self.is_listening = False
-            if hasattr(self, 'stream') and self.stream:
-                self.stream.stop()
-                self.stream.close()
 
     def stop_listening(self):
         """
         Stops the audio stream and transcription process.
         """
         if not self.is_listening:
-            self.status_callback("Not currently listening.")
+            print("Not currently listening.")
             return
 
         self.is_listening = False
         if hasattr(self, 'stream') and self.stream:
             self.stream.stop()
             self.stream.close()
-
-        self.is_recording = False
-        self.status_callback("Stopped listening.")
+        print("Stopped listening.")
 
     def save_audio_stream(self, output_path):
         """
-        Saves the captured audio stream to a MP3 file.
-        :param output_path: The path to save the MP3 file.
+        Placeholder for functionality to save the captured audio stream.
         """
-        if not self.recorded_frames:
-            self.status_callback("No audio recorded to save.")
-            return
+        print(f"[INFO] Audio stream saving to {output_path} is not yet implemented.")
 
+
+if __name__ == '__main__':
+    # Example Usage:
+    VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'vosk-model')
+
+    def handle_transcription(text, is_final):
+        """A simple callback to print the transcription results."""
+        if is_final:
+            print(f"Final: {text}")
+        else:
+            print(f"Partial: {text}")
+
+    if not os.path.exists(VOSK_MODEL_PATH) or not os.listdir(VOSK_MODEL_PATH):
+        print("Vosk model not found or directory is empty.")
+        print(f"Please download a model from https://alphacephei.com/vosk/models and unzip it to: {VOSK_MODEL_PATH}")
+    else:
         try:
-            # Ensure the output directory exists
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            engine = TranscriptionEngine(VOSK_MODEL_PATH)
 
-            # Combine the recorded frames into a single numpy array
-            audio_data = np.concatenate(self.recorded_frames, axis=0)
+            # 1. List available audio devices
+            print("Available audio input devices:")
+            devices = engine.list_audio_devices()
+            for index, name in devices.items():
+                print(f"  [{index}] {name}")
 
-            # Create an AudioSegment from the raw audio data
-            audio_segment = AudioSegment(
-                audio_data.tobytes(),
-                frame_rate=TARGET_SAMPLERATE,
-                sample_width=audio_data.dtype.itemsize,
-                channels=1
+            # In a real UI, you would present this list in a dropdown.
+            # For this demo, we will use the default device (None).
+            # To test a specific device, change SELECTED_DEVICE_INDEX to the desired index.
+            SELECTED_DEVICE_INDEX = None
+
+            print("\nStarting transcription in 3 seconds... Speak into your microphone.")
+            import time
+            time.sleep(3)
+
+            # 2. Start listening on the selected device
+            import threading
+            transcription_thread = threading.Thread(
+                target=engine.start_listening,
+                args=(handle_transcription, SELECTED_DEVICE_INDEX)
             )
+            transcription_thread.daemon = True
+            transcription_thread.start()
 
-            # Export the audio to MP3 format
-            audio_segment.export(output_path, format="mp3")
+            # Let it run for 10 seconds
+            time.sleep(10)
+            engine.stop_listening()
+            print("Demonstration finished.")
 
-            self.status_callback(f"Audio saved to {output_path}")
         except Exception as e:
-            self.status_callback(f"Error saving audio: {e}")
+            print(f"An error occurred during the demonstration: {e}")
+            print("Please ensure you have 'sounddevice' and 'vosk' installed: pip install sounddevice vosk")
