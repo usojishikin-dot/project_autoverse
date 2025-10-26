@@ -11,8 +11,12 @@ from scipy.signal import resample
 # --- Configuration for Audio Processing ---
 TARGET_SAMPLERATE = 16000
 TARGET_DTYPE = 'int16'
-BLOCKSIZE = 8000
+BLOCKSIZE = 4000  # Smaller blocksize for lower latency; may increase CPU load.
 SILENCE_THRESHOLD = 0.02
+
+# --- Model Confirmation ---
+# For maximum speed and low latency, a small model like 'vosk-model-small-en-us-0.15' is recommended.
+# The current configuration in main.py points to a model of this size.
 
 # --- 1. The Vocabulary Generator Class ---
 

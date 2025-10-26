@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         self.core_logic = CoreLogic(self.data_engine)
         self.transcription_engine = TranscriptionEngine(VOSK_MODEL_PATH)
         self.signals = WorkerSignals()
+        self.last_displayed_citation = None
 
         self.initUI()
         self.post_init_checks()
@@ -367,12 +368,20 @@ class MainWindow(QMainWindow):
         self.signals.update_status.emit(message)
 
     def update_transcript_display(self, text, is_final):
-        if is_final and text.strip():
-            self.transcript_text.append(text)
-            translation = self.translation_combo.currentText()
-            verse_data = self.core_logic.parse_and_find_verse(text, translation)
-            if verse_data:
+        """Handles transcription updates from the engine, parsing partial results for low latency."""
+        if is_final:
+            if text.strip():
+                self.transcript_text.append(text)
+            self.last_displayed_citation = None # Reset cache on final result
+
+        translation = self.translation_combo.currentText()
+        verse_data = self.core_logic.parse_and_find_verse(text, translation)
+
+        if verse_data:
+            citation_key = (verse_data['book'], verse_data['chapter'], verse_data['verse_num'])
+            if citation_key != self.last_displayed_citation:
                 self.display_verse(verse_data)
+                self.last_displayed_citation = citation_key
 
     def update_status_bar(self, message):
         """Updates the status bar with a message."""
@@ -389,6 +398,7 @@ class MainWindow(QMainWindow):
         """Clears the transcript and preview displays."""
         self.transcript_text.clear()
         self.preview_text.setText("Output will appear here.")
+        self.last_displayed_citation = None
         self.update_status_bar("Displays cleared.")
 
     def closeEvent(self, event):
