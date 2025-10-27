@@ -25,26 +25,19 @@ RECORDING_PATH = os.path.join(BASE_DIR, '..', 'data', 'recordings')
 # --- Stylesheet for Dark Theme ---
 DARK_STYLESHEET = """
     QMainWindow, QWidget {
-        background-color: #1E1E1E;
-        color: #FFFFFF;
+        background-color: #2A2A2A;
+        color: #D9D9D9;
         font-family: Segoe UI;
     }
-    QTextEdit {
-        background-color: #2D2D2D;
-        border: 1px solid #444444;
-        font-size: 11pt;
-    }
-    QLabel {
-        font-size: 9pt;
-        font-weight: bold;
-        color: #CCCCCC;
-    }
-    QLabel#VersePreviewText {
-        font-size: 14pt;
-        font-family: "Times New Roman";
+    QLineEdit, QTextEdit {
+        background-color: #3C3C3C;
+        color: #FFFFFF;
+        border: 1px solid #555555;
+        border-radius: 4px;
+        padding: 5px;
     }
     QPushButton {
-        background-color: #0078D7;
+        background-color: #4C4C4C;
         color: #FFFFFF;
         border: none;
         padding: 8px 16px;
@@ -53,41 +46,29 @@ DARK_STYLESHEET = """
         border-radius: 4px;
     }
     QPushButton:hover {
-        background-color: #005A9E;
-    }
-    QPushButton:pressed {
-        background-color: #003C6A;
+        background-color: #636363;
     }
     QPushButton#StartListenButton {
-        background-color: #107C10; /* Green */
+        background-color: #4C4C4C;
         font-size: 12pt;
     }
-    QPushButton#StartListenButton:hover {
-        background-color: #0E6B0E;
-    }
     QPushButton#StartListenButton:checked {
-        background-color: #C50F1F; /* Red */
-    }
-    QComboBox, QLineEdit, QSpinBox, QFontComboBox {
-        background-color: #2D2D2D;
-        border: 1px solid #444444;
-        padding: 5px;
-        border-radius: 4px;
-    }
-    QComboBox#AudioDeviceCombo[listening="true"] {
-        background-color: #107C10; /* Green */
-        color: white;
-        font-weight: bold;
-    }
-    QComboBox::drop-down {
-        border: none;
+        background-color: #4CAF50; /* Green */
     }
     QFrame#OutputPreview {
-        background-color: black;
+        background-color: #000000;
         border: 2px solid #444444;
         border-radius: 5px;
     }
+    QLabel#VersePreviewText {
+        font-size: 14pt;
+        font-family: "Times New Roman";
+    }
 """
+
+def apply_stylesheet(app):
+    """Applies the master QSS stylesheet to the application."""
+    app.setStyleSheet(DARK_STYLESHEET)
 
 class SelectAllLineEdit(QLineEdit):
     """A QLineEdit that selects all text when it receives focus."""
@@ -104,7 +85,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("AutoVerse Control Panel")
         self.resize(1200, 700)
-        self.setStyleSheet(DARK_STYLESHEET)
         self.current_partial_text = ""
         self.last_displayed_citation = None
         self.last_detection_timestamp = 0.0
@@ -415,6 +395,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    apply_stylesheet(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
