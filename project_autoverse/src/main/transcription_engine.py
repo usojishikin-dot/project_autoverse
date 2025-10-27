@@ -67,7 +67,7 @@ class TranscriptionEngine:
 
             self.stream = sd.RawInputStream(
                 samplerate=samplerate,
-                blocksize=2048, # Lowered for minimal latency. A value of 4000 is safer on slower systems.
+                blocksize=8000,
                 device=device_index,
                 dtype='int16',
                 channels=1,
