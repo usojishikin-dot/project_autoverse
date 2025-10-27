@@ -269,7 +269,7 @@ class MainWindow(QMainWindow):
 
     def populate_audio_devices(self):
         self.audio_devices = self.transcription_engine.list_audio_devices()
-        for index, name in self.audio_devices.items():
+        for index, name in enumerate(self.audio_devices):
             self.audio_device_combo.addItem(name, userData=index)
 
     def manual_lookup(self):
