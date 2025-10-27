@@ -117,14 +117,21 @@ class CoreLogic:
 
     def get_ui_text(self, verse_data):
         """
-        Formats the verse data into a string for UI display.
+        Formats the verse data into an HTML string for UI display.
 
         :param verse_data: A dictionary with verse info.
-        :return: A formatted string for the UI.
+        :return: An HTML-formatted string for the UI.
         """
         if not verse_data:
             return ""
-        return f'"...{verse_data["text"]}"\n\n{verse_data["book"]} {verse_data["chapter"]}:{verse_data["verse_num"]} ({verse_data["translation"]})'
+
+        verse_text = f'"...{verse_data["text"]}"'
+        citation_text = f"{verse_data['book']} {verse_data['chapter']}:{verse_data['verse_num']} ({verse_data['translation']})"
+
+        return f"""
+            <p>{verse_text}</p>
+            <p style='color: #AAAAAA; font-size: 10pt;'>{citation_text}</p>
+        """
 
 
 if __name__ == '__main__':
