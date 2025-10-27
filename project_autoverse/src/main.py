@@ -104,6 +104,9 @@ class MainWindow(QMainWindow):
         self.transcription_engine = TranscriptionEngine(VOSK_MODEL_PATH)
         self.signals = WorkerSignals()
 
+        # --- State Management ---
+        self.last_verse_timestamp = 0
+
         self.initUI()
         self.populate_audio_devices()
 
@@ -268,6 +271,7 @@ class MainWindow(QMainWindow):
         return group_widget
 
     def populate_audio_devices(self):
+        self.audio_device_combo.clear()
         self.audio_devices = self.transcription_engine.list_audio_devices()
         for index, name in self.audio_devices.items():
             self.audio_device_combo.addItem(name, userData=index)
@@ -290,7 +294,8 @@ class MainWindow(QMainWindow):
                 'book': book.title(),
                 'chapter': chapter,
                 'verse_num': verse,
-                'text': verse_text
+                'text': verse_text,
+                'timestamp': time.time()
             }
             self.display_verse(verse_data)
         else:
@@ -314,18 +319,24 @@ class MainWindow(QMainWindow):
         self.signals.update_transcript.emit(text, is_final)
 
     def update_transcript_display(self, text, is_final):
-        if is_final and text.strip():
-            self.transcript_text.append(text)
+        # We process partial results for lower latency
+        if text.strip():
             translation = self.translation_combo.currentText()
             verse_data = self.core_logic.parse_and_find_verse(text, translation)
-            if verse_data:
+
+            if verse_data and verse_data['timestamp'] > self.last_verse_timestamp:
+                self.last_verse_timestamp = verse_data['timestamp']
                 self.display_verse(verse_data)
+
+        if is_final and text.strip():
+            self.transcript_text.append(text)
 
     def display_verse(self, verse_data):
         """Updates the preview panel with the found verse."""
-        formatted_text = f'"...{verse_data["text"]}"\n\n{verse_data["book"]} {verse_data["chapter"]}:{verse_data["verse_num"]} ({verse_data["translation"]})'
-        self.preview_text.setText(formatted_text)
-        print(f"Displaying Verse: {formatted_text}") # For debugging
+        # Use the HTML formatter from CoreLogic
+        formatted_html = self.core_logic.get_ui_text(verse_data)
+        self.preview_text.setText(formatted_html)
+        print(f"Displaying Verse: {verse_data['book']} {verse_data['chapter']}:{verse_data['verse_num']}")
 
     def closeEvent(self, event):
         if self.transcription_engine.is_listening:
