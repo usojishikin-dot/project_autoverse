@@ -361,7 +361,7 @@ class MainWindow(QMainWindow):
 
             if self.record_audio_checkbox.isChecked():
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                output_path = os.path.join(RECORDING_PATH, f'recording_{timestamp}.mp3')
+                output_path = os.path.join(RECORDING_PATH, f'recording_{timestamp}.wav')
                 self.transcription_engine.save_audio_stream(output_path)
 
     def on_transcription_update(self, text, is_final):
