@@ -1,12 +1,10 @@
-
 import sys
 import os
 import threading
-from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QComboBox, QTextEdit, QLabel, QLineEdit, QFontComboBox, 
-    QSpinBox, QColorDialog, QFrame, QCompleter, QCheckBox
+    QSpinBox, QColorDialog, QFrame, QCompleter
 )
 from PyQt6.QtCore import pyqtSignal, QObject, Qt, QStringListModel
 
@@ -16,28 +14,33 @@ from transcription_engine import TranscriptionEngine
 from data_engine import DataEngine
 from core_logic import CoreLogic
 
-# --- Robust Path Configuration ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VOSK_MODEL_PATH = os.path.join(BASE_DIR, "vosk-model-small-en-us-0.15")
-DB_PATH = os.path.join(BASE_DIR, '..', 'data', 'bible.db')
-RECORDING_PATH = os.path.join(BASE_DIR, '..', 'data', 'recordings')
+# --- Configuration ---
+VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'vosk-model')
+DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'bible.db')
 
 # --- Stylesheet for Dark Theme ---
 DARK_STYLESHEET = """
     QMainWindow, QWidget {
-        background-color: #2A2A2A;
-        color: #D9D9D9;
+        background-color: #1E1E1E;
+        color: #FFFFFF;
         font-family: Segoe UI;
     }
-    QLineEdit, QTextEdit {
-        background-color: #3C3C3C;
-        color: #FFFFFF;
-        border: 1px solid #555555;
-        border-radius: 4px;
-        padding: 5px;
+    QTextEdit {
+        background-color: #2D2D2D;
+        border: 1px solid #444444;
+        font-size: 11pt;
+    }
+    QLabel {
+        font-size: 9pt;
+        font-weight: bold;
+        color: #CCCCCC;
+    }
+    QLabel#VersePreviewText {
+        font-size: 14pt;
+        font-family: "Times New Roman";
     }
     QPushButton {
-        background-color: #4C4C4C;
+        background-color: #0078D7;
         color: #FFFFFF;
         border: none;
         padding: 8px 16px;
@@ -46,29 +49,36 @@ DARK_STYLESHEET = """
         border-radius: 4px;
     }
     QPushButton:hover {
-        background-color: #636363;
+        background-color: #005A9E;
+    }
+    QPushButton:pressed {
+        background-color: #003C6A;
     }
     QPushButton#StartListenButton {
-        background-color: #4C4C4C;
+        background-color: #107C10; /* Green */
         font-size: 12pt;
     }
+    QPushButton#StartListenButton:hover {
+        background-color: #0E6B0E;
+    }
     QPushButton#StartListenButton:checked {
-        background-color: #4CAF50; /* Green */
+        background-color: #C50F1F; /* Red */
+    }
+    QComboBox, QLineEdit, QSpinBox, QFontComboBox {
+        background-color: #2D2D2D;
+        border: 1px solid #444444;
+        padding: 5px;
+        border-radius: 4px;
+    }
+    QComboBox::drop-down {
+        border: none;
     }
     QFrame#OutputPreview {
-        background-color: #000000;
+        background-color: black;
         border: 2px solid #444444;
         border-radius: 5px;
     }
-    QLabel#VersePreviewText {
-        font-size: 14pt;
-        font-family: "Times New Roman";
-    }
 """
-
-def apply_stylesheet(app):
-    """Applies the master QSS stylesheet to the application."""
-    app.setStyleSheet(DARK_STYLESHEET)
 
 class SelectAllLineEdit(QLineEdit):
     """A QLineEdit that selects all text when it receives focus."""
@@ -78,16 +88,13 @@ class SelectAllLineEdit(QLineEdit):
 
 class WorkerSignals(QObject):
     update_transcript = pyqtSignal(str, bool)
-    update_status = pyqtSignal(str)
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AutoVerse Control Panel")
         self.resize(1200, 700)
-        self.current_partial_text = ""
-        self.last_displayed_citation = None
-        self.last_detection_timestamp = 0.0
+        self.setStyleSheet(DARK_STYLESHEET)
 
         # --- Initialize Engines ---
         self.data_engine = DataEngine(DB_PATH)
@@ -98,7 +105,7 @@ class MainWindow(QMainWindow):
         self.signals = WorkerSignals()
 
         self.initUI()
-        self.post_init_checks()
+        self.populate_audio_devices()
 
     def initUI(self):
         central_widget = QWidget()
@@ -132,36 +139,19 @@ class MainWindow(QMainWindow):
 
         # === BOTTOM ROW: AUDIO & CLEAR ===
         bottom_layout = QHBoxLayout()
-        self.record_audio_checkbox = QCheckBox("Record Audio")
-        bottom_layout.addWidget(self.record_audio_checkbox)
+        bottom_layout.addWidget(QLabel("Audio Record")) # Placeholder for switch
         bottom_layout.addStretch()
         
         bottom_layout.addWidget(QLabel("Audio Source:"))
         self.audio_device_combo = QComboBox()
-        self.audio_device_combo.setObjectName("AudioDeviceCombo")
         self.audio_device_combo.setMinimumWidth(200)
         bottom_layout.addWidget(self.audio_device_combo)
 
         self.clear_button = QPushButton("CLEAR SCREEN")
-        self.clear_button.clicked.connect(self.clear_displays)
         bottom_layout.addWidget(self.clear_button)
         main_layout.addLayout(bottom_layout)
 
-        # === STATUS BAR ===
-        self.statusBar = self.statusBar()
-        self.status_label = QLabel("Welcome to AutoVerse.")
-        self.statusBar.addWidget(self.status_label)
-
         self.signals.update_transcript.connect(self.update_transcript_display)
-        self.signals.update_status.connect(self.update_status_bar)
-
-    def post_init_checks(self):
-        """Checks to run after the UI is initialized."""
-        self.populate_audio_devices()
-        if not self.transcription_engine.model_loaded:
-            self.update_status_bar("ERROR: Vosk model not found. Please download and place it in the data/vosk-model folder.")
-            self.listen_button.setEnabled(False)
-            self.listen_button.setText("MODEL NOT FOUND")
 
     def create_manual_override_group(self):
         group_widget = QWidget()
@@ -278,16 +268,9 @@ class MainWindow(QMainWindow):
         return group_widget
 
     def populate_audio_devices(self):
-        self.audio_devices, default_device_index = self.transcription_engine.list_audio_devices()
+        self.audio_devices = self.transcription_engine.list_audio_devices()
         for index, name in self.audio_devices.items():
             self.audio_device_combo.addItem(name, userData=index)
-
-        if default_device_index != -1:
-            # Find the combo box index corresponding to the default device index
-            for i in range(self.audio_device_combo.count()):
-                if self.audio_device_combo.itemData(i) == default_device_index:
-                    self.audio_device_combo.setCurrentIndex(i)
-                    break
 
     def manual_lookup(self):
         """Looks up a verse based on manual input fields."""
@@ -316,76 +299,38 @@ class MainWindow(QMainWindow):
     def toggle_listening(self):
         if self.listen_button.isChecked():
             self.listen_button.setText("STOP LISTENING")
-            self.audio_device_combo.setProperty("listening", "true")
-            # Refresh stylesheet
-            self.audio_device_combo.style().unpolish(self.audio_device_combo)
-            self.audio_device_combo.style().polish(self.audio_device_combo)
-
             selected_index = self.audio_device_combo.currentData()
-            should_record = self.record_audio_checkbox.isChecked()
-
             self.transcription_thread = threading.Thread(
                 target=self.transcription_engine.start_listening,
-                args=(self.on_transcription_update, self.on_status_update, selected_index, should_record)
+                args=(self.on_transcription_update, selected_index)
             )
             self.transcription_thread.daemon = True
             self.transcription_thread.start()
         else:
             self.listen_button.setText("START LISTENING")
-            self.audio_device_combo.setProperty("listening", "false")
-            # Refresh stylesheet
-            self.audio_device_combo.style().unpolish(self.audio_device_combo)
-            self.audio_device_combo.style().polish(self.audio_device_combo)
-
             self.transcription_engine.stop_listening()
 
             if self.record_audio_checkbox.isChecked():
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                output_path = os.path.join(RECORDING_PATH, f'recording_{timestamp}.wav')
+                output_path = os.path.join(RECORDING_PATH, f'recording_{timestamp}.mp3')
                 self.transcription_engine.save_audio_stream(output_path)
 
     def on_transcription_update(self, text, is_final):
         self.signals.update_transcript.emit(text, is_final)
 
-    def on_status_update(self, message):
-        self.signals.update_status.emit(message)
-
     def update_transcript_display(self, text, is_final):
-        """Handles transcription updates from the engine, parsing partial results for low latency."""
-        if is_final:
-            if text.strip():
-                self.transcript_text.append(text)
-            self.last_displayed_citation = None
-            self.last_detection_timestamp = 0.0 # Reset timestamp on final result
-
-        translation = self.translation_combo.currentText()
-        verse_data = self.core_logic.parse_and_find_verse(text, translation)
-
-        if verse_data and verse_data['timestamp'] > self.last_detection_timestamp:
-            citation_key = (verse_data['book'], verse_data['chapter'], verse_data['verse_num'])
-            if citation_key != self.last_displayed_citation:
+        if is_final and text.strip():
+            self.transcript_text.append(text)
+            translation = self.translation_combo.currentText()
+            verse_data = self.core_logic.parse_and_find_verse(text, translation)
+            if verse_data:
                 self.display_verse(verse_data)
-                self.last_displayed_citation = citation_key
-                self.last_detection_timestamp = verse_data['timestamp']
-
-    def update_status_bar(self, message):
-        """Updates the status bar with a message."""
-        print(f"UI Status: {message}") # Debugging print
-        self.status_label.setText(message)
 
     def display_verse(self, verse_data):
         """Updates the preview panel with the found verse."""
-        formatted_text = self.core_logic.get_ui_text(verse_data)
+        formatted_text = f'"...{verse_data["text"]}"\n\n{verse_data["book"]} {verse_data["chapter"]}:{verse_data["verse_num"]} ({verse_data["translation"]})'
         self.preview_text.setText(formatted_text)
-        self.update_status_bar(f"Displayed: {verse_data['book']} {verse_data['chapter']}:{verse_data['verse_num']}")
-
-    def clear_displays(self):
-        """Clears the transcript and preview displays."""
-        self.transcript_text.clear()
-        self.preview_text.setText("Output will appear here.")
-        self.last_displayed_citation = None
-        self.last_detection_timestamp = 0.0
-        self.update_status_bar("Displays cleared.")
+        print(f"Displaying Verse: {formatted_text}") # For debugging
 
     def closeEvent(self, event):
         if self.transcription_engine.is_listening:
@@ -394,8 +339,11 @@ class MainWindow(QMainWindow):
         event.accept()
 
 def main():
+    if not os.path.exists(VOSK_MODEL_PATH) or not os.listdir(VOSK_MODEL_PATH):
+        print(f"Error: Vosk model not found at {VOSK_MODEL_PATH}")
+        return
+
     app = QApplication(sys.argv)
-    apply_stylesheet(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
