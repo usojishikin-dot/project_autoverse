@@ -1,75 +1,129 @@
 
 import csv
 import os
+import logging
 from data_engine import DataEngine
+
+# Configure basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def populate_from_csv(db_engine, csv_path, translation_name):
     """
-    Populates the database from a CSV file.
+    Populates the database from a CSV file after validating its structure.
 
-    :param db_engine: An instance of the DataEngine.
-    :param csv_path: The path to the CSV file.
-    :param translation_name: The name of the translation (e.g., 'KJV').
+    Args:
+        db_engine (DataEngine): An instance of the DataEngine.
+        csv_path (str): The path to the CSV file.
+        translation_name (str): The name of the translation (e.g., 'KJV').
     """
+    # --- 1. File Existence Check ---
+    # Moved from the original code for early exit.
     if not os.path.exists(csv_path):
-        print(f"Error: CSV file not found at {csv_path}")
-        print("Please ensure you have downloaded the file and placed it in the correct directory.")
+        logging.error(f"CSV file not found at {csv_path}")
+        logging.warning("Please ensure you have downloaded the file and placed it in the correct directory.")
         return
 
-    print(f"Populating database with {translation_name} translation from {csv_path}...")
+    logging.info(f"Starting population for '{translation_name}' from {csv_path}...")
+
+    # --- 2. Define required columns for validation ---
+    required_columns = {'book', 'chapter', 'verse', 'text'}
 
     try:
         with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
-            # Skipping header row if it exists. Adjust if your CSV doesn't have a header.
-            next(reader, None)  
 
+            # --- 3. Header Validation ---
+            # Reads the first row to check for required column names.
+            try:
+                header = next(reader)
+                # Create a mapping from column name to index
+                column_indices = {name.strip(): i for i, name in enumerate(header)}
+
+                # Check if all required columns are present in the header
+                if not required_columns.issubset(column_indices.keys()):
+                    missing = required_columns - column_indices.keys()
+                    logging.error(f"CSV file is missing required columns: {', '.join(missing)}")
+                    return
+            except StopIteration:
+                logging.error("CSV file is empty.")
+                return
+
+            # --- 4. Database Insertion Logic ---
+            # Correctly get a cursor from the connection object.
             cursor = db_engine.connection.cursor()
+
             verses_to_insert = []
-            for row in reader:
-                                try:
-                                    # Corrected indices: Book Name=1, Chapter=3, Verse=4, Text=5
-                                    book_name = row[1]
-                                    chapter = int(row[3])
-                                    verse_num = int(row[4])
-                                    text = row[5]
-                                    verses_to_insert.append((translation_name, book_name, chapter, verse_num, text))
-                                except (IndexError, ValueError) as e:                    print(f"Skipping malformed row: {row} - Error: {e}")
+            malformed_rows = 0
 
-            # Use executemany for efficient bulk insertion
-            cursor.executemany("""
-                INSERT INTO scriptures (translation, book, chapter, verse_num, text)
-                VALUES (?, ?, ?, ?, ?)
-            """, verses_to_insert)
+            for i, row in enumerate(reader, 1):
+                try:
+                    # Use the dynamically found indices for robust data extraction
+                    book_name = row[column_indices['book']]
+                    chapter = int(row[column_indices['chapter']])
+                    verse_num = int(row[column_indices['verse']])
+                    text = row[column_indices['text']]
 
-            db_engine.connection.commit()
-            print(f"Successfully inserted {len(verses_to_insert)} verses.")
+                    verses_to_insert.append((translation_name, book_name, chapter, verse_num, text))
+                except (IndexError, ValueError) as e:
+                    # Log parsing errors for specific rows
+                    logging.warning(f"Skipping malformed row #{i+1}: {row} - Error: {e}")
+                    malformed_rows += 1
 
+            # --- 5. Efficient Bulk Insertion ---
+            # Use executemany for much faster inserts.
+            if verses_to_insert:
+                cursor.executemany("""
+                    INSERT INTO scriptures (translation, book, chapter, verse_num, text)
+                    VALUES (?, ?, ?, ?, ?)
+                """, verses_to_insert)
+
+                # Commit the transaction to save changes.
+                db_engine.connection.commit()
+                logging.info(f"Successfully inserted {len(verses_to_insert)} verses.")
+            else:
+                logging.warning("No valid verses found to insert.")
+
+            if malformed_rows > 0:
+                logging.warning(f"Skipped {malformed_rows} malformed rows.")
+
+    except IOError as e:
+        # --- 6. Improved Exception Handling ---
+        # Catches file-related errors (e.g., permissions).
+        logging.error(f"Could not read the file at {csv_path}: {e}")
     except Exception as e:
-        print(f"An error occurred during database population: {e}")
+        # General exception for any other unexpected errors.
+        logging.error(f"An unexpected error occurred: {e}")
+        # In a transactional database, you might want to rollback here.
+        # db_engine.connection.rollback()
     finally:
-        if cursor:
+        # --- 7. Graceful Cleanup ---
+        # Ensure the cursor is closed if it was created.
+        if 'cursor' in locals() and cursor:
             cursor.close()
 
 if __name__ == '__main__':
     # --- Configuration ---
-    DB_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'bible.db')
-    KJV_CSV_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 't_kjv.csv')
+    # Use absolute paths for reliability.
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DB_FILE = os.path.join(BASE_DIR, '..', '..', 'data', 'bible.db')
+    KJV_CSV_PATH = os.path.join(BASE_DIR, '..', '..', 'data', 't_kjv.csv')
     
     # --- Execution ---
     # Initialize the data engine
     engine = DataEngine(DB_FILE)
-    engine.connect()
-    # Ensure the table is created
-    engine.setup_database() 
 
-    # Populate with KJV data
-    populate_from_csv(engine, KJV_CSV_PATH, 'KJV')
+    try:
+        engine.connect()
+        # Ensure the table is created before population
+        engine.setup_database()
 
-    # You would add calls for other translations here, e.g.:
-    # NIV_CSV_PATH = os.path.join('..', 'data', 't_niv.csv')
-    # populate_from_csv(engine, NIV_CSV_PATH, 'NIV')
+        # Populate with KJV data
+        populate_from_csv(engine, KJV_CSV_PATH, 'KJV')
 
-    # Close the connection
-    engine.close_connection()
-    print("Database population process finished.")
+    except Exception as e:
+        # Catch connection or setup errors
+        logging.critical(f"A critical error occurred during initialization: {e}")
+    finally:
+        # Always close the connection
+        engine.close_connection()
+        logging.info("Database population process finished.")
